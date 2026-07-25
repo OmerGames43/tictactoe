@@ -4,7 +4,8 @@ const PORT = process.env.PORT || 3000;
 
 const rooms = {};
 
-app.get('/tictactoe/make_move.php', (req, res) => {
+// 1️⃣ إنشاء غرفة أو تسجيل حركة
+app.get('/make_move.php', (req, res) => {
     const { action, room, board, pos, player } = req.query;
 
     if (action === 'create') {
@@ -20,7 +21,8 @@ app.get('/tictactoe/make_move.php', (req, res) => {
     res.send("ERROR");
 });
 
-app.get('/tictactoe/get_move.php', (req, res) => {
+// 2️⃣ الاستعلام عن حركة الخصم
+app.get('/get_move.php', (req, res) => {
     const { room } = req.query;
     if (rooms[room]) {
         return res.send(rooms[room]);
