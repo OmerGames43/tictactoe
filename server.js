@@ -2,14 +2,16 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ذاكرة مؤقتة لتخزين حركة كل غرفة
+// ذاكرة لتخزين تحركات وغرف اللعبة
 const rooms = {};
 
-// معالجة طلبات إنشاء الغرفة أو إرسال حركة أو شات
+// معالجة رابط إنشاء الغرف والحركات والشات
 app.get('/make_move.php', (req, res) => {
     const { action, room, board, pos, player, move } = req.query;
 
-    if (!room) return res.send('ERROR_NO_ROOM');
+    if (!room) {
+        return res.send('ERROR_NO_ROOM');
+    }
 
     if (action === 'create') {
         rooms[room] = { lastMove: 'INIT' };
@@ -21,17 +23,15 @@ app.get('/make_move.php', (req, res) => {
     }
 
     if (move) {
-        // إرسال النص أو الإيموجي
         rooms[room].lastMove = move;
     } else if (board !== undefined && pos !== undefined && player !== undefined) {
-        // إرسال حركة اللاعب
         rooms[room].lastMove = `${board},${pos},${player}`;
     }
 
     res.send('OK');
 });
 
-// معالجة طلب جلب أحدث حركة في الغرفة
+// معالجة رابط استلام التحركات
 app.get('/get_move.php', (req, res) => {
     const { room } = req.query;
 
@@ -42,6 +42,12 @@ app.get('/get_move.php', (req, res) => {
     res.send(rooms[room].lastMove);
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+// الصفحة الرئيسية لتأكيد عمل السيرفر
+app.get('/', (req, res) => {
+    res.send('Server is running successfully');
 });
+
+app.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
+});
+ 
