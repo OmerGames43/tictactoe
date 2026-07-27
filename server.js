@@ -2,16 +2,16 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ذاكرة لتخزين تحركات وغرف اللعبة
 const rooms = {};
 
-// معالجة رابط إنشاء الغرف والحركات والشات
+app.get('/', (req, res) => {
+    res.send('Tic Tac Toe Server is running');
+});
+
 app.get('/make_move.php', (req, res) => {
     const { action, room, board, pos, player, move } = req.query;
 
-    if (!room) {
-        return res.send('ERROR_NO_ROOM');
-    }
+    if (!room) return res.send('ERROR_NO_ROOM');
 
     if (action === 'create') {
         rooms[room] = { lastMove: 'INIT' };
@@ -31,7 +31,6 @@ app.get('/make_move.php', (req, res) => {
     res.send('OK');
 });
 
-// معالجة رابط استلام التحركات
 app.get('/get_move.php', (req, res) => {
     const { room } = req.query;
 
@@ -42,12 +41,6 @@ app.get('/get_move.php', (req, res) => {
     res.send(rooms[room].lastMove);
 });
 
-// الصفحة الرئيسية لتأكيد عمل السيرفر
-app.get('/', (req, res) => {
-    res.send('Server is running successfully');
-});
-
 app.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
- 
