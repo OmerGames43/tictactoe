@@ -2,46 +2,44 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// تخزين بيانات الغرف في الذاكرة
+// ذاكرة مؤقتة لتخزين حركة كل غرفة
 const rooms = {};
 
+// معالجة طلبات إنشاء الغرفة أو إرسال حركة أو شات
 app.get('/make_move.php', (req, res) => {
-    const room = req.query.room;
-    const action = req.query.action;
-    const move = req.query.move;
-    const board = req.query.board;
-    const pos = req.query.pos;
-    const player = req.query.player;
+    const { action, room, board, pos, player, move } = req.query;
 
-    if (!room) return res.send("ERROR: NO_ROOM");
+    if (!room) return res.send('ERROR_NO_ROOM');
 
     if (action === 'create') {
-        rooms[room] = "INIT";
-        return res.send("CREATED");
+        rooms[room] = { lastMove: 'INIT' };
+        return res.send('CREATED');
     }
 
-    if (board !== undefined && pos !== undefined && player !== undefined) {
-        rooms[room] = `${board},${pos},${player}`;
-        return res.send("OK");
+    if (!rooms[room]) {
+        rooms[room] = { lastMove: 'INIT' };
     }
 
     if (move) {
-        rooms[room] = move;
-        return res.send("OK");
+        // إرسال النص أو الإيموجي
+        rooms[room].lastMove = move;
+    } else if (board !== undefined && pos !== undefined && player !== undefined) {
+        // إرسال حركة اللاعب
+        rooms[room].lastMove = `${board},${pos},${player}`;
     }
 
-    res.send("ERROR: INVALID_REQUEST");
+    res.send('OK');
 });
 
+// معالجة طلب جلب أحدث حركة في الغرفة
 app.get('/get_move.php', (req, res) => {
-    const room = req.query.room;
-    if (!room) return res.send("ERROR: NO_ROOM");
-    
-    if (!rooms[room]) {
-        return res.send("ERROR: ROOM_NOT_FOUND");
+    const { room } = req.query;
+
+    if (!room || !rooms[room]) {
+        return res.send('ERROR_ROOM_NOT_FOUND');
     }
 
-    res.send(rooms[room]);
+    res.send(rooms[room].lastMove);
 });
 
 app.listen(PORT, () => {
