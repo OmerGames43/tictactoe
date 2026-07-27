@@ -1,51 +1,49 @@
 const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-
 const app = express();
-const server = http.createServer(app);
-
-const io = new Server(server, {
-    cors: { origin: "*" }
-});
-
-io.on('connection', (socket) => {
-    console.log('مستخدم جديد اتصل:', socket.id);
-
-    // الانضمام للغرفة
-    socket.on('join_room', (roomId) => {
-        socket.join(roomId);
-        console.log(`المستخدم ${socket.id} انضم للغرفة: ${roomId}`);
-        
-        // إبلاغ اللاعب الآخر بوجود منافس
-        socket.to(roomId).emit('user_joined', socket.id);
-
-        // --- إشارات نقل اللعب (TicTacToe Moves) ---
-        socket.on('send_move', (data) => {
-            socket.to(roomId).emit('receive_move', data);
-        });
-
-        // --- إشارات الصوت WebRTC ---
-        socket.on('offer', (data) => {
-            socket.to(roomId).emit('offer', { offer: data.offer, sender: socket.id });
-        });
-
-        socket.on('answer', (data) => {
-            socket.to(roomId).emit('answer', { answer: data.answer, sender: socket.id });
-        });
-
-        socket.on('ice_candidate', (data) => {
-            socket.to(roomId).emit('ice_candidate', { candidate: data.candidate, sender: socket.id });
-        });
-
-        // عند خروج اللاعب
-        socket.on('disconnect', () => {
-            socket.to(roomId).emit('user_left', socket.id);
-        });
-    });
-});
-
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT}`);
+
+// تخزين بيانات الغرف في الذاكرة
+const rooms = {};
+
+app.get('/make_move.php', (req, res) => {
+    const room = req.query.room;
+    const action = req.query.action;
+    const move = req.query.move;
+    const board = req.query.board;
+    const pos = req.query.pos;
+    const player = req.query.player;
+
+    if (!room) return res.send("ERROR: NO_ROOM");
+
+    if (action === 'create') {
+        rooms[room] = "INIT";
+        return res.send("CREATED");
+    }
+
+    if (board !== undefined && pos !== undefined && player !== undefined) {
+        rooms[room] = `${board},${pos},${player}`;
+        return res.send("OK");
+    }
+
+    if (move) {
+        rooms[room] = move;
+        return res.send("OK");
+    }
+
+    res.send("ERROR: INVALID_REQUEST");
+});
+
+app.get('/get_move.php', (req, res) => {
+    const room = req.query.room;
+    if (!room) return res.send("ERROR: NO_ROOM");
+    
+    if (!rooms[room]) {
+        return res.send("ERROR: ROOM_NOT_FOUND");
+    }
+
+    res.send(rooms[room]);
+});
+
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
