@@ -1,46 +1,43 @@
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+
 const app = express();
+const server = http.createServer(app);
+
+// إعداد Socket.io مع السماح بالاتصال من أي مصدر (CORS)
+const io = new Server(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
+
+// تحديد البورت تلقائياً من Railway أو استخدام 3000 للتجربة المحلية
 const PORT = process.env.PORT || 3000;
 
-const rooms = {};
-
+// مسار بسيط للتأكد من أن السيرفر يعمل عند فتحه في المتصفح
 app.get('/', (req, res) => {
-    res.send('Tic Tac Toe Server is running');
+    res.send('XO Game Server is Running!');
 });
 
-app.get('/make_move.php', (req, res) => {
-    const { action, room, board, pos, player, move } = req.query;
+// إدارة اتصالات اللعبة عبر Socket.io
+io.on('connection', (socket) => {
+    console.log('لاعب جديد اتصل:', socket.id);
 
-    if (!room) return res.send('ERROR_NO_ROOM');
+    // استقبال حركة من لاعب (XO Move)
+    socket.on('make_move', (data) => {
+        // إرسال الحركة للاعب الآخر في نفس الغرفة أو للجميع
+        socket.broadcast.emit('receive_move', data);
+    });
 
-    if (action === 'create') {
-        rooms[room] = { lastMove: 'INIT' };
-        return res.send('CREATED');
-    }
-
-    if (!rooms[room]) {
-        rooms[room] = { lastMove: 'INIT' };
-    }
-
-    if (move) {
-        rooms[room].lastMove = move;
-    } else if (board !== undefined && pos !== undefined && player !== undefined) {
-        rooms[room].lastMove = `${board},${pos},${player}`;
-    }
-
-    res.send('OK');
+    // عند قطع الاتصال
+    socket.on('disconnect', () => {
+        console.log('لاعب قطع الاتصال:', socket.id);
+    });
 });
 
-app.get('/get_move.php', (req, res) => {
-    const { room } = req.query;
-
-    if (!room || !rooms[room]) {
-        return res.send('ERROR_ROOM_NOT_FOUND');
-    }
-
-    res.send(rooms[room].lastMove);
-});
-
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+// تشغيل السيرفر على البورت المحدد
+server.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
 });
