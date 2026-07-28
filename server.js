@@ -4,80 +4,89 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// تخزين الغرف في الذاكرة المؤقتة
+// تخزين بيانات الغرف
 const rooms = {};
 
-// 1. فحص تشغيل السيرفر
 app.get('/', (req, res) => {
-    res.send("Tic-Tac-Toe Server is Running Perfectly!");
+    res.send("Tic-Tac-Toe Server is Running!");
 });
 
-// 2. إنشاء غرفة جديدة
+// 1. إنشاء غرفة جديدة
 app.post('/create_room.php', (req, res) => {
     const { roomId, player } = req.body;
-    if (!roomId) {
-        return res.status(400).json({ success: false, error: "Room ID is required" });
-    }
+    if (!roomId) return res.status(400).json({ success: false, error: "Room ID required" });
 
     rooms[roomId] = {
         player1: player || 1,
         player2: null,
-        lastMove: null,
-        lastChat: null
+        moves: [],      // حفظ كافة الحركات لضمان عدم ضياع أي حركة
+        chats: [],      // حفظ الرسائل
+        currentTurn: 1  // Player 1 يبدأ دائماً
     };
 
     console.log(`Room created: ${roomId}`);
-    res.json({ success: true, message: "Room created successfully" });
+    res.json({ success: true });
 });
 
-// 3. الانضمام لغرفة
+// 2. الانضمام للغرفة
 app.post('/join_room.php', (req, res) => {
     const { roomId, player } = req.body;
     if (rooms[roomId]) {
         rooms[roomId].player2 = player || 2;
         console.log(`Player joined room: ${roomId}`);
-        return res.json({ success: true, message: "Joined successfully" });
+        return res.json({ success: true });
     }
     res.status(404).json({ success: false, error: "Room not found" });
 });
 
-// 4. إرسال حركة
+// 3. تسجيل الحركة مع التحقق من الدور
 app.post('/make_move.php', (req, res) => {
     const { roomId, board, pos, player } = req.body;
     if (rooms[roomId]) {
-        rooms[roomId].lastMove = { board, pos, player };
+        const room = rooms[roomId];
+
+        const moveObj = {
+            board: parseInt(board),
+            pos: parseInt(pos),
+            player: parseInt(player),
+            id: Date.now()
+        };
+
+        room.moves.push(moveObj);
+        room.currentTurn = (parseInt(player) === 1) ? 2 : 1;
+
+        console.log(`Move in ${roomId}: Board ${board}, Pos ${pos}, Player ${player}`);
         return res.json({ success: true });
     }
     res.status(404).json({ success: false, error: "Room not found" });
 });
 
-// 5. إرسال شات / إيموجي
+// 4. إرسال الشات
 app.post('/send_chat.php', (req, res) => {
     const { roomId, message } = req.body;
     if (rooms[roomId]) {
-        rooms[roomId].lastChat = message;
+        rooms[roomId].chats.push({ message, id: Date.now() });
         return res.json({ success: true });
     }
     res.status(404).json({ success: false, error: "Room not found" });
 });
 
-// 6. استلام التحديثات (Polling) وتصفيرها لمنع التكرار والتعليق
+// 5. جلب التحديثات (Polling)
 app.post('/get_updates.php', (req, res) => {
-    const { roomId } = req.body;
+    const { roomId, lastMoveId, lastChatId } = req.body;
     if (rooms[roomId]) {
         const room = rooms[roomId];
 
-        const updates = {
+        // تصفية الحركات والرسائل الجديدة فقط بالنسبة للهاتف المستعلم
+        const newMoves = room.moves.filter(m => !lastMoveId || m.id > lastMoveId);
+        const newChats = room.chats.filter(c => !lastChatId || c.id > lastChatId);
+
+        return res.json({
             opponentConnected: room.player2 !== null,
-            lastMove: room.lastMove,
-            lastChat: room.lastChat
-        };
-
-        // تصفير الحركة والشات فور استلامهما لعدم تكرارهما
-        room.lastMove = null;
-        room.lastChat = null;
-
-        return res.json(updates);
+            currentTurn: room.currentTurn,
+            moves: newMoves,
+            chats: newChats
+        });
     }
     res.status(404).json({ success: false, error: "Room not found" });
 });
