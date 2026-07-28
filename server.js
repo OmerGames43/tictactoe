@@ -1,96 +1,96 @@
 const express = require('express');
-const app = express();
-const PORT = process.env.PORT || 3000;
+const cors = require('cors');
 
+const app = express();
+
+// تفعيل CORS وقبول بيانات JSON
+app.use(cors());
 app.use(express.json());
 
-// تخزين بيانات الغرف
+// كائن لتخزين بيانات الغرف
 const rooms = {};
 
-app.get('/', (req, res) => {
-    res.send("Tic-Tac-Toe Server is Running!");
-});
-
-// 1. إنشاء غرفة جديدة
+// 1. إنشاء غرفة جديدة (/create_room.php)
 app.post('/create_room.php', (req, res) => {
     const { roomId, player } = req.body;
-    if (!roomId) return res.status(400).json({ success: false, error: "Room ID required" });
+    
+    if (!roomId) {
+        return res.status(400).json({ error: "roomId is required" });
+    }
 
     rooms[roomId] = {
-        player1: player || 1,
-        player2: null,
-        moves: [],      // حفظ كافة الحركات لضمان عدم ضياع أي حركة
-        chats: [],      // حفظ الرسائل
-        currentTurn: 1  // Player 1 يبدأ دائماً
+        player1Connected: true,
+        player2Connected: false,
+        lastMove: null,
+        lastChat: null
     };
 
-    console.log(`Room created: ${roomId}`);
-    res.json({ success: true });
+    console.log(`[CREATE] Room ${roomId} created by Player ${player}`);
+    return res.json({ success: true, status: "created" });
 });
 
-// 2. الانضمام للغرفة
+// 2. الانضمام إلى غرفة (/join_room.php)
 app.post('/join_room.php', (req, res) => {
     const { roomId, player } = req.body;
+
     if (rooms[roomId]) {
-        rooms[roomId].player2 = player || 2;
-        console.log(`Player joined room: ${roomId}`);
-        return res.json({ success: true });
+        rooms[roomId].player2Connected = true;
+        console.log(`[JOIN] Player ${player} joined Room ${roomId}`);
+        return res.json({ status: "joined", success: true });
+    } else {
+        console.log(`[JOIN FAIL] Room ${roomId} not found`);
+        return res.status(404).json({ status: "error", message: "Room not found" });
     }
-    res.status(404).json({ success: false, error: "Room not found" });
 });
 
-// 3. تسجيل الحركة مع التحقق من الدور
+// 3. إرسال حركة جديدة (/make_move.php)
 app.post('/make_move.php', (req, res) => {
     const { roomId, board, pos, player } = req.body;
+
     if (rooms[roomId]) {
-        const room = rooms[roomId];
-
-        const moveObj = {
-            board: parseInt(board),
-            pos: parseInt(pos),
-            player: parseInt(player),
-            id: Date.now()
-        };
-
-        room.moves.push(moveObj);
-        room.currentTurn = (parseInt(player) === 1) ? 2 : 1;
-
-        console.log(`Move in ${roomId}: Board ${board}, Pos ${pos}, Player ${player}`);
+        rooms[roomId].lastMove = { board, pos, player };
+        console.log(`[MOVE] Room ${roomId} -> Player ${player} played at board:${board}, pos:${pos}`);
         return res.json({ success: true });
+    } else {
+        return res.status(404).json({ error: "Room not found" });
     }
-    res.status(404).json({ success: false, error: "Room not found" });
 });
 
-// 4. إرسال الشات
-app.post('/send_chat.php', (req, res) => {
-    const { roomId, message } = req.body;
-    if (rooms[roomId]) {
-        rooms[roomId].chats.push({ message, id: Date.now() });
-        return res.json({ success: true });
-    }
-    res.status(404).json({ success: false, error: "Room not found" });
-});
-
-// 5. جلب التحديثات (Polling)
+// 4. جلب التحديثات دورياً (/get_updates.php)
 app.post('/get_updates.php', (req, res) => {
-    const { roomId, lastMoveId, lastChatId } = req.body;
+    const { roomId } = req.body;
+
     if (rooms[roomId]) {
-        const room = rooms[roomId];
-
-        // تصفية الحركات والرسائل الجديدة فقط بالنسبة للهاتف المستعلم
-        const newMoves = room.moves.filter(m => !lastMoveId || m.id > lastMoveId);
-        const newChats = room.chats.filter(c => !lastChatId || c.id > lastChatId);
-
         return res.json({
-            opponentConnected: room.player2 !== null,
-            currentTurn: room.currentTurn,
-            moves: newMoves,
-            chats: newChats
+            opponentConnected: rooms[roomId].player2Connected,
+            lastMove: rooms[roomId].lastMove,
+            lastChat: rooms[roomId].lastChat
+        });
+    } else {
+        return res.json({
+            opponentConnected: false,
+            lastMove: null,
+            lastChat: null
         });
     }
-    res.status(404).json({ success: false, error: "Room not found" });
 });
 
-app.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT}`);
+// 5. إرسال دردشة / إيموجي (/send_chat.php)
+app.post('/send_chat.php', (req, res) => {
+    const { roomId, message } = req.body;
+
+    if (rooms[roomId]) {
+        rooms[roomId].lastChat = message;
+        console.log(`[CHAT] Room ${roomId}: ${message}`);
+        return res.json({ success: true });
+    } else {
+        return res.status(404).json({ error: "Room not found" });
+    }
 });
+
+// تشغيل الخادم على المنفذ المخصص من Render
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`TicTacToe server is running on port ${PORT}`);
+});
+ 
