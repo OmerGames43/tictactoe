@@ -9,6 +9,19 @@ app.use(express.json());
 // كائن لتخزين بيانات الغرف
 const rooms = {};
 
+// فحص دوري كل دقيقة لحذف الغرف التي لم تحدث فيها أي نشاط منذ أكثر من 5 دقائق (300000 مللي ثانية)
+setInterval(() => {
+    const now = Date.now();
+    const TIMEOUT_LIMIT = 5 * 60 * 1000; // 5 دقائق
+
+    for (const roomId in rooms) {
+        if (now - rooms[roomId].lastActivity > TIMEOUT_LIMIT) {
+            console.log(`[AUTO-DELETE] Room ${roomId} deleted due to inactivity.`);
+            delete rooms[roomId];
+        }
+    }
+}, 60 * 1000);
+
 // 1. إنشاء غرفة جديدة (/create_room.php)
 app.post('/create_room.php', (req, res) => {
     const { roomId, player, playerName, playerId } = req.body;
@@ -23,16 +36,23 @@ app.post('/create_room.php', (req, res) => {
 
     rooms[roomId] = {
         player1_id: playerId || "p1_default",
-        player1_name: playerName || "اللاعب 1",
+        player1_name: playerName || "المنشئ",
         player1_connected: true,
         
         player2_id: null,
         player2_name: "الخصم",
         player2_connected: false,
 
-        boardHistory: [], // حفظ كل الحركات ليراها المشاهد
+        spectators: [], // قائمة المشاهدين
+
+        boardHistory: [],
         lastMove: null,
         lastChat: null,
+        
+        newGameRequest: null,
+        newGameAccepted: false,
+        newGameDeclined: false,
+
         lastActivity: Date.now()
     };
 
@@ -69,14 +89,19 @@ app.post('/join_room.php', (req, res) => {
     // انضمام لاعب ثاني لأول مرة
     if (!room.player2_id) {
         room.player2_id = playerId;
-        room.player2_name = playerName;
+        room.player2_name = playerName || "الخصم";
         room.player2_connected = true;
         console.log(`[JOIN] Player 2 (${playerName}) joined ${roomId}`);
         return res.json({ status: "joined", gameState: room });
     }
 
-    // الغرفة ممتلئة -> الانضمام كمشاهد وإرسال حالة اللعبة والحركات المكتملة
-    console.log(`[SPECTATE] Spectator (${playerName}) joined ${roomId}`);
+    // الغرفة ممتلئة -> الانضمام كمشاهد
+    const specName = playerName || "مشاهد";
+    if (!room.spectators.includes(specName)) {
+        room.spectators.push(specName);
+    }
+
+    console.log(`[SPECTATE] Spectator (${specName}) joined ${roomId}`);
     return res.json({
         status: "spectator",
         gameState: room
@@ -90,7 +115,7 @@ app.post('/make_move.php', (req, res) => {
     if (rooms[roomId]) {
         const moveData = { board, pos, player };
         rooms[roomId].lastMove = moveData;
-        rooms[roomId].boardHistory.push(moveData); // تسجيل الحركة لتاريخ اللوحة
+        rooms[roomId].boardHistory.push(moveData);
         rooms[roomId].lastActivity = Date.now();
 
         console.log(`[MOVE] Room ${roomId} -> Player ${player} played at board:${board}, pos:${pos}`);
@@ -100,18 +125,16 @@ app.post('/make_move.php', (req, res) => {
     }
 });
 
-// 4. جلب التحديثات دورياً والتحقق من حالة الاتصال وحذف الغرفة (/get_updates.php)
+// 4. جلب التحديثات دورياً (/get_updates.php)
 app.post('/get_updates.php', (req, res) => {
     const { roomId } = req.body;
 
     if (!rooms[roomId]) {
-        // إذا حُذفت الغرفة يُبلغ التطبيق لإعادة الجميع للرئيسية
         return res.json({ status: "room_deleted" });
     }
 
     const room = rooms[roomId];
 
-    // إذا خرج اللاعبان الأساسيان معاً بعد بدئهما اللعب -> حذف الغرفة فوراً
     if (!room.player1_connected && !room.player2_connected && room.player2_id) {
         delete rooms[roomId];
         console.log(`[DELETE] Room ${roomId} deleted because both players left.`);
@@ -120,26 +143,69 @@ app.post('/get_updates.php', (req, res) => {
 
     return res.json({
         status: "ok",
-        opponentName: room.player2_name || 'الخصم',
+        creatorName: room.player1_name,
+        opponentName: room.player2_name,
         opponentConnected: room.player2_connected,
+        spectators: room.spectators,
         lastMove: room.lastMove,
         lastChat: room.lastChat,
+        newGameRequest: room.newGameRequest,
+        newGameAccepted: room.newGameAccepted,
+        newGameDeclined: room.newGameDeclined,
         boardHistory: room.boardHistory
     });
 });
 
-// 5. مغادرة أو خروج لاعب (/leave_room.php)
+// 5. طلب لعبة جديدة (/request_new_game.php)
+app.post('/request_new_game.php', (req, res) => {
+    const { roomId, senderTag, requestId } = req.body;
+    if (rooms[roomId]) {
+        rooms[roomId].newGameRequest = { senderTag, requestId };
+        rooms[roomId].newGameAccepted = false;
+        rooms[roomId].newGameDeclined = false;
+        rooms[roomId].lastActivity = Date.now();
+        return res.json({ success: true });
+    }
+    return res.status(404).json({ error: "Room not found" });
+});
+
+// 6. قبول لعبة جديدة (/accept_new_game.php)
+app.post('/accept_new_game.php', (req, res) => {
+    const { roomId } = req.body;
+    if (rooms[roomId]) {
+        rooms[roomId].newGameAccepted = true;
+        rooms[roomId].newGameRequest = null;
+        rooms[roomId].boardHistory = [];
+        rooms[roomId].lastMove = null;
+        rooms[roomId].lastActivity = Date.now();
+        return res.json({ success: true });
+    }
+    return res.status(404).json({ error: "Room not found" });
+});
+
+// 7. رفض لعبة جديدة (/decline_new_game.php)
+app.post('/decline_new_game.php', (req, res) => {
+    const { roomId } = req.body;
+    if (rooms[roomId]) {
+        rooms[roomId].newGameDeclined = true;
+        rooms[roomId].newGameRequest = null;
+        rooms[roomId].lastActivity = Date.now();
+        return res.json({ success: true });
+    }
+    return res.status(404).json({ error: "Room not found" });
+});
+
+// 8. مغادرة الغرفة (/leave_room.php)
 app.post('/leave_room.php', (req, res) => {
-    const { roomId, playerId } = req.body;
+    const { roomId, playerId, playerTag } = req.body;
 
     if (rooms[roomId]) {
-        if (rooms[roomId].player1_id === playerId) {
+        if (playerTag === 1) {
             rooms[roomId].player1_connected = false;
-        } else if (rooms[roomId].player2_id === playerId) {
+        } else if (playerTag === 2) {
             rooms[roomId].player2_connected = false;
         }
 
-        // تحريك فحص الحذف إذا خرق كلاهما
         if (!rooms[roomId].player1_connected && !rooms[roomId].player2_connected && rooms[roomId].player2_id) {
             delete rooms[roomId];
             console.log(`[DELETE LEAVE] Room ${roomId} deleted.`);
@@ -151,14 +217,13 @@ app.post('/leave_room.php', (req, res) => {
     return res.json({ success: false });
 });
 
-// 6. إرسال دردشة / إيموجي (/send_chat.php)
+// 9. إرسال الدردشة (/send_chat.php)
 app.post('/send_chat.php', (req, res) => {
     const { roomId, message } = req.body;
 
     if (rooms[roomId]) {
         rooms[roomId].lastChat = message;
         rooms[roomId].lastActivity = Date.now();
-        console.log(`[CHAT] Room ${roomId}: ${message}`);
         return res.json({ success: true });
     } else {
         return res.status(404).json({ error: "Room not found" });
