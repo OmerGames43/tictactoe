@@ -141,7 +141,8 @@ app.post('/get_updates.php', (req, res) => {
         return res.json({ status: "room_deleted" });
     }
 
-    return res.json({
+    // تجهيز الرد وإرساله
+    const responseData = {
         status: "ok",
         creatorName: room.player1_name,
         opponentName: room.player2_name,
@@ -153,7 +154,17 @@ app.post('/get_updates.php', (req, res) => {
         newGameAccepted: room.newGameAccepted,
         newGameDeclined: room.newGameDeclined,
         boardHistory: room.boardHistory
-    });
+    };
+
+    // تصفير الحالات المؤقتة فور قراءتها لمنع التكرار (Loop)
+    if (room.newGameAccepted) {
+        room.newGameAccepted = false;
+    }
+    if (room.newGameDeclined) {
+        room.newGameDeclined = false;
+    }
+
+    return res.json(responseData);
 });
 
 // 5. طلب لعبة جديدة (/request_new_game.php)
@@ -174,10 +185,12 @@ app.post('/accept_new_game.php', (req, res) => {
     const { roomId } = req.body;
     if (rooms[roomId]) {
         rooms[roomId].newGameAccepted = true;
+        rooms[roomId].newGameDeclined = false;
         rooms[roomId].newGameRequest = null;
         rooms[roomId].boardHistory = [];
-        rooms[roomId].lastMove = null;
+        rooms[roomId].lastMove = null; // مسح الحركة الأخيرة لتنظيف اللوحة
         rooms[roomId].lastActivity = Date.now();
+        console.log(`[NEW GAME] Room ${roomId} accepted a new game.`);
         return res.json({ success: true });
     }
     return res.status(404).json({ error: "Room not found" });
@@ -188,8 +201,10 @@ app.post('/decline_new_game.php', (req, res) => {
     const { roomId } = req.body;
     if (rooms[roomId]) {
         rooms[roomId].newGameDeclined = true;
+        rooms[roomId].newGameAccepted = false;
         rooms[roomId].newGameRequest = null;
         rooms[roomId].lastActivity = Date.now();
+        console.log(`[NEW GAME] Room ${roomId} declined a new game.`);
         return res.json({ success: true });
     }
     return res.status(404).json({ error: "Room not found" });
@@ -234,3 +249,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`TicTacToe server is running on port ${PORT}`);
 });
+ 
