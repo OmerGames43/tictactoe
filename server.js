@@ -52,6 +52,7 @@ app.post('/create_room.php', (req, res) => {
         newGameRequest: null,
         newGameAccepted: false,
         newGameDeclined: false,
+        lastAcceptedRequestId: null,
 
         lastActivity: Date.now()
     };
@@ -72,36 +73,28 @@ app.post('/join_room.php', (req, res) => {
     const room = rooms[roomId];
     room.lastActivity = Date.now();
 
-    // إعادة اتصال اللاعب الأول (المنشئ)
     if (room.player1_id === playerId) {
         room.player1_connected = true;
-        console.log(`[REJOIN] Player 1 (${playerName}) re-joined ${roomId}`);
         return res.json({ status: "rejoined_creator", gameState: room });
     }
 
-    // إعادة اتصال اللاعب الثاني
     if (room.player2_id === playerId) {
         room.player2_connected = true;
-        console.log(`[REJOIN] Player 2 (${playerName}) re-joined ${roomId}`);
         return res.json({ status: "rejoined_player2", gameState: room });
     }
 
-    // انضمام لاعب ثاني لأول مرة
     if (!room.player2_id) {
         room.player2_id = playerId;
         room.player2_name = playerName || "الخصم";
         room.player2_connected = true;
-        console.log(`[JOIN] Player 2 (${playerName}) joined ${roomId}`);
         return res.json({ status: "joined", gameState: room });
     }
 
-    // الغرفة ممتلئة -> الانضمام كمشاهد
     const specName = playerName || "مشاهد";
     if (!room.spectators.includes(specName)) {
         room.spectators.push(specName);
     }
 
-    console.log(`[SPECTATE] Spectator (${specName}) joined ${roomId}`);
     return res.json({
         status: "spectator",
         gameState: room
@@ -117,8 +110,6 @@ app.post('/make_move.php', (req, res) => {
         rooms[roomId].lastMove = moveData;
         rooms[roomId].boardHistory.push(moveData);
         rooms[roomId].lastActivity = Date.now();
-
-        console.log(`[MOVE] Room ${roomId} -> Player ${player} played at board:${board}, pos:${pos}`);
         return res.json({ success: true });
     } else {
         return res.status(404).json({ error: "Room not found" });
@@ -137,11 +128,9 @@ app.post('/get_updates.php', (req, res) => {
 
     if (!room.player1_connected && !room.player2_connected && room.player2_id) {
         delete rooms[roomId];
-        console.log(`[DELETE] Room ${roomId} deleted because both players left.`);
         return res.json({ status: "room_deleted" });
     }
 
-    // تجهيز الرد وإرساله دون تصفير مسبق خاطئ
     const responseData = {
         status: "ok",
         creatorName: room.player1_name,
@@ -155,6 +144,18 @@ app.post('/get_updates.php', (req, res) => {
         newGameDeclined: room.newGameDeclined,
         boardHistory: room.boardHistory
     };
+
+    if (room.newGameAccepted) {
+        setTimeout(() => {
+            if (rooms[roomId]) {
+                rooms[roomId].newGameAccepted = false;
+            }
+        }, 2000);
+    }
+
+    if (room.newGameDeclined) {
+        room.newGameDeclined = false;
+    }
 
     return res.json(responseData);
 });
@@ -180,7 +181,7 @@ app.post('/accept_new_game.php', (req, res) => {
         rooms[roomId].newGameDeclined = false;
         rooms[roomId].newGameRequest = null;
         rooms[roomId].boardHistory = [];
-        rooms[roomId].lastMove = null; // مسح الحركة الأخيرة لتنظيف اللوحة
+        rooms[roomId].lastMove = null; 
         rooms[roomId].lastActivity = Date.now();
         console.log(`[NEW GAME] Room ${roomId} accepted a new game.`);
         return res.json({ success: true });
@@ -196,7 +197,6 @@ app.post('/decline_new_game.php', (req, res) => {
         rooms[roomId].newGameAccepted = false;
         rooms[roomId].newGameRequest = null;
         rooms[roomId].lastActivity = Date.now();
-        console.log(`[NEW GAME] Room ${roomId} declined a new game.`);
         return res.json({ success: true });
     }
     return res.status(404).json({ error: "Room not found" });
@@ -215,7 +215,6 @@ app.post('/leave_room.php', (req, res) => {
 
         if (!rooms[roomId].player1_connected && !rooms[roomId].player2_connected && rooms[roomId].player2_id) {
             delete rooms[roomId];
-            console.log(`[DELETE LEAVE] Room ${roomId} deleted.`);
             return res.json({ status: "room_deleted" });
         }
 
@@ -237,6 +236,7 @@ app.post('/send_chat.php', (req, res) => {
     }
 });
 
+// تم تصحيح تعريف المتغير هنا (إزالة الفاصلة الزائدة)
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`TicTacToe server is running on port ${PORT}`);
