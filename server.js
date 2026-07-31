@@ -141,7 +141,7 @@ app.post('/get_updates.php', (req, res) => {
         return res.json({ status: "room_deleted" });
     }
 
-    // تجهيز الرد وإرساله
+    // تجهيز الرد وإرساله دون تصفير مسبق خاطئ
     const responseData = {
         status: "ok",
         creatorName: room.player1_name,
@@ -155,14 +155,6 @@ app.post('/get_updates.php', (req, res) => {
         newGameDeclined: room.newGameDeclined,
         boardHistory: room.boardHistory
     };
-
-    // تصفير الحالات المؤقتة فور قراءتها لمنع التكرار (Loop)
-    if (room.newGameAccepted) {
-        room.newGameAccepted = false;
-    }
-    if (room.newGameDeclined) {
-        room.newGameDeclined = false;
-    }
 
     return res.json(responseData);
 });
@@ -249,4 +241,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`TicTacToe server is running on port ${PORT}`);
 });
- 
