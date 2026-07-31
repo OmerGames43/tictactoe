@@ -204,10 +204,20 @@ app.post('/decline_new_game.php', (req, res) => {
 
 // 8. مغادرة الغرفة (/leave_room.php)
 app.post('/leave_room.php', (req, res) => {
-    const { roomId, playerId, playerTag } = req.body;
+    const { roomId, playerId, playerTag, playerName } = req.body;
 
     if (rooms[roomId]) {
-        if (playerTag === 1) {
+        // إذا كان المغادر مشاهد (playerTag === 3 أو تم إرسال اسم المشاهد)
+        if (playerTag === 3 || playerName) {
+            const specName = playerName ? playerName.replace("👁️", "").trim() : "";
+            if (specName) {
+                rooms[roomId].spectators = rooms[roomId].spectators.filter(name => {
+                    const cleanExisting = name.replace("👁️", "").trim();
+                    return cleanExisting !== specName;
+                });
+                console.log(`[SPECTATOR LEFT] Spectator ${specName} left room ${roomId}`);
+            }
+        } else if (playerTag === 1) {
             rooms[roomId].player1_connected = false;
         } else if (playerTag === 2) {
             rooms[roomId].player2_connected = false;
@@ -236,8 +246,8 @@ app.post('/send_chat.php', (req, res) => {
     }
 });
 
-// تم تصحيح تعريف المتغير هنا (إزالة الفاصلة الزائدة)
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`TicTacToe server is running on port ${PORT}`);
 });
+ 
