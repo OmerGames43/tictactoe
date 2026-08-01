@@ -61,7 +61,7 @@ app.post('/create_room.php', (req, res) => {
     return res.json({ success: true, status: "created" });
 });
 
-// 2. الانضمام إلى غرفة (/join_room.php)
+// 2. الانضمام إلى غرفة (/join_room.php) - (تم تعديل الاستجابة لتشمل الأسماء صراحة)
 app.post('/join_room.php', (req, res) => {
     const { roomId, playerId, playerName } = req.body;
 
@@ -75,19 +75,34 @@ app.post('/join_room.php', (req, res) => {
 
     if (room.player1_id === playerId) {
         room.player1_connected = true;
-        return res.json({ status: "rejoined_creator", gameState: room });
+        return res.json({ 
+            status: "rejoined_creator", 
+            gameState: room,
+            creatorName: room.player1_name,
+            opponentName: room.player2_name
+        });
     }
 
     if (room.player2_id === playerId) {
         room.player2_connected = true;
-        return res.json({ status: "rejoined_player2", gameState: room });
+        return res.json({ 
+            status: "rejoined_player2", 
+            gameState: room,
+            creatorName: room.player1_name,
+            opponentName: room.player2_name
+        });
     }
 
     if (!room.player2_id) {
         room.player2_id = playerId;
         room.player2_name = playerName || "الخصم";
         room.player2_connected = true;
-        return res.json({ status: "joined", gameState: room });
+        return res.json({ 
+            status: "joined", 
+            gameState: room,
+            creatorName: room.player1_name,
+            opponentName: room.player2_name
+        });
     }
 
     const specName = playerName || "مشاهد";
@@ -97,7 +112,9 @@ app.post('/join_room.php', (req, res) => {
 
     return res.json({
         status: "spectator",
-        gameState: room
+        gameState: room,
+        creatorName: room.player1_name,
+        opponentName: room.player2_name
     });
 });
 
@@ -207,7 +224,6 @@ app.post('/leave_room.php', (req, res) => {
     const { roomId, playerId, playerTag, playerName } = req.body;
 
     if (rooms[roomId]) {
-        // إذا كان المغادر مشاهد (playerTag === 3 أو تم إرسال اسم المشاهد)
         if (playerTag === 3 || playerName) {
             const specName = playerName ? playerName.replace("👁️", "").trim() : "";
             if (specName) {
@@ -250,4 +266,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`TicTacToe server is running on port ${PORT}`);
 });
- 
