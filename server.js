@@ -265,7 +265,6 @@ app.post('/decline_new_game.php', (req, res) => {
     }
     return res.json({ status: "error" });
 });
-
 // 10. مغادرة الغرفة (/leave_room.php)
 app.post('/leave_room.php', (req, res) => {
     const { roomId, playerTag, playerId } = req.body;
@@ -273,7 +272,7 @@ app.post('/leave_room.php', (req, res) => {
     if (rooms[roomId]) {
         const room = rooms[roomId];
 
-        // تسجيل خروج اللاعب وتفعيل مؤقت الـ 30 ثانية فوراً
+        // تسجيل خروج اللاعب
         if (playerTag === 1 || room.player1_id === playerId) {
             room.player1_connected = false;
             room.lastEventMessage = `المنشئ "${room.player1_name}" غادر الغرفة`;
@@ -282,7 +281,14 @@ app.post('/leave_room.php', (req, res) => {
             room.lastEventMessage = `اللاعب "${room.player2_name}" غادر الغرفة`;
         }
 
-        // بدء المؤقت عند مغادرة أحد اللاعبين الأساسيين إذا لم يكن مفعلًا
+        // **[التعديل الهام هنا]**: 
+        // إذا لم ينضم اللاعب الثاني بعد (الغرفة في مرحلة الانتظار)، فلا تقم بتفعيل مؤقت الحذف مطلقاً عند خروج المنشئ.
+        // مؤقت الـ 30 ثانية يعمل فقط إذا كان هناك لاعب ثانٍ وبدأ اللعب الفعلي ثم انقطع أحدها.
+        if (!room.player2_id) {
+            return res.json({ status: "ok" });
+        }
+
+        // بدء المؤقت عند مغادرة أحد اللاعبين الأساسيين في غرفة مكتملة فقط
         if (!room.disconnectTimer) {
             room.disconnectTimer = setTimeout(() => {
                 if (rooms[roomId]) {
@@ -296,7 +302,3 @@ app.post('/leave_room.php', (req, res) => {
     return res.json({ status: "room_not_found" });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-});
