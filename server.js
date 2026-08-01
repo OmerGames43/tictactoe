@@ -33,17 +33,22 @@ app.post('/create_room.php', (req, res) => {
     return res.json({ status: "created" });
 });
 
-// 2. استعراض الغرف المتاحة (/get_rooms.php) - [أضفنا هذا المسار ليتوافق مع واجهة القائمة لديك]
+// 2. استعراض الغرف المتاحة (/get_rooms.php)
 app.all('/get_rooms.php', (req, res) => {
     const roomsList = [];
     for (const rId in rooms) {
         const room = rooms[rId];
-        // إرجاع الغرف التي لم يكتمل فيها اللاعب الثاني بعد
-        if (!room.player2_id || !room.player2_connected) {
+        
+        // إرجاع الغرف التي لا يزال فيها مكان لخلو اللاعب الثاني أو في حالة انتظار
+        const isWaitingForPlayer = (!room.player2_id || !room.player2_connected);
+        
+        if (isWaitingForPlayer) {
             roomsList.push({
                 roomId: rId,
                 creatorName: room.player1_name,
-                hasOpponent: false
+                opponentName: room.player2_name,
+                hasOpponent: !!room.player2_id,
+                spectatorsCount: room.spectators.length
             });
         }
     }
@@ -52,7 +57,7 @@ app.all('/get_rooms.php', (req, res) => {
 
 // 3. انضمام غرفة (/join_room.php)
 app.post('/join_room.php', (req, res) => {
-    const { roomId, playerName, playerId, player } = req.body;
+    const { roomId, playerName, playerId } = req.body;
 
     if (!rooms[roomId]) {
         return res.json({ status: "room_not_found" });
@@ -60,7 +65,7 @@ app.post('/join_room.php', (req, res) => {
 
     const room = rooms[roomId];
 
-    // إعادة انضمام المنشئ
+    // إعادة انضمام المنشئ (اللاعب الأول)
     if (room.player1_id === playerId) {
         room.player1_connected = true;
         return res.json({
@@ -82,7 +87,7 @@ app.post('/join_room.php', (req, res) => {
         });
     }
 
-    // انضمام لاعب ثاني لأول مرة
+    // انضمام لاعب ثاني لأول مرة (إذا لم يكن هناك لاعب ثانٍ أو كان غير متصل)
     if (!room.player2_id || !room.player2_connected) {
         room.player2_id = playerId;
         room.player2_name = playerName;
@@ -95,8 +100,10 @@ app.post('/join_room.php', (req, res) => {
         });
     }
 
-    // إذا كانت الغرفة ممتلئة، يدخل كمشاهد
-    room.spectators.push(playerName);
+    // إذا كانت الغرفة ممتلئة بالكامل، يدخل كمشاهد
+    if (!room.spectators.includes(playerName)) {
+        room.spectators.push(playerName);
+    }
     return res.json({
         status: "spectator",
         creatorName: room.player1_name,
@@ -130,7 +137,8 @@ app.post('/get_updates.php', (req, res) => {
 
     const room = rooms[roomId];
 
-    if (!room.player1_connected && !room.player2_connected && room.player2_id) {
+    // حذف الغرفة فقط إذا انقطع اتصال الطرفين تماماً
+    if (!room.player1_connected && !room.player2_connected && room.spectators.length === 0) {
         delete rooms[roomId];
         return res.json({ status: "room_deleted" });
     }
@@ -213,17 +221,25 @@ app.post('/decline_new_game.php', (req, res) => {
 
 // 10. مغادرة الغرفة (/leave_room.php)
 app.post('/leave_room.php', (req, res) => {
-    const { roomId, playerTag } = req.body;
+    const { roomId, playerTag, playerId } = req.body;
+    
     if (rooms[roomId]) {
-        if (playerTag === 1) rooms[roomId].player1_connected = false;
-        if (playerTag === 2) rooms[roomId].player2_connected = false;
+        const room = rooms[roomId];
+
+        if (playerTag === 1 || room.player1_id === playerId) {
+            room.player1_connected = false;
+        } else if (playerTag === 2 || room.player2_id === playerId) {
+            room.player2_connected = false;
+        }
         
-        if (!rooms[roomId].player1_connected && !rooms[roomId].player2_connected) {
+        // لا يتم حذف الغرفة بشكل نهائي إلا إذا خرج الطرفان تماماً ولم يتبق مشاهدون
+        if (!room.player1_connected && !room.player2_connected && room.spectators.length === 0) {
             delete rooms[roomId];
         }
+
         return res.json({ status: "ok" });
     }
-    return res.json({ status: "ok" });
+    return res.json({ status: "room_not_found" });
 });
 
 const PORT = process.env.PORT || 3000;
