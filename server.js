@@ -28,7 +28,9 @@ app.post('/create_room.php', (req, res) => {
         newGameRequest: null,
         newGameAccepted: false,
         newGameDeclined: false,
-        disconnectTimer: null // **[تمت الإضافة]** مؤقت مهلة خروج أحد اللاعبين
+        disconnectTimer: null, // مؤقت مهلة خروج أحد اللاعبين (30 ثانية)
+        createdAt: Date.now(), // **[تمت الإضافة]** لتسجيل وقت الإنشاء وحذف الغرفة بعد ساعة إذا لم ينضم أحد
+        lastEventMessage: null // **[تمت الإضافة]** لتنبيهات انضمام أو عودة اللاعبين
     };
 
     return res.json({ status: "created" });
@@ -36,6 +38,15 @@ app.post('/create_room.php', (req, res) => {
 
 // 2. استعراض الغرف المتاحة (/get_rooms.php)
 app.all('/get_rooms.php', (req, res) => {
+    const now = Date.now();
+    for (const rId in rooms) {
+        // **[تمت الإضافة]** حذف الغرفة إذا مر عليها أكثر من ساعة (3600000 ملي ثانية) ولم ينضم لاعب ثاني
+        if (!rooms[rId].player2_id && (now - rooms[rId].createdAt > 3600000)) {
+            if (rooms[rId].disconnectTimer) clearTimeout(rooms[rId].disconnectTimer);
+            delete rooms[rId];
+        }
+    }
+
     const roomsList = [];
     for (const rId in rooms) {
         const room = rooms[rId];
@@ -63,13 +74,15 @@ app.post('/join_room.php', (req, res) => {
 
     const room = rooms[roomId];
 
-    // **[تم التعديل]** إعادة انضمام المنشئ وإلغاء مؤقت الحذف إن وجد
+    // إعادة انضمام المنشئ وإلغاء مؤقت الحذف إن وجد
     if (room.player1_id === playerId) {
         room.player1_connected = true;
         if (room.disconnectTimer) {
             clearTimeout(room.disconnectTimer);
             room.disconnectTimer = null;
         }
+        room.lastEventMessage = `المنشئ "${room.player1_name}" عاد للغرفة`;
+
         return res.json({
             status: "rejoined_creator",
             creatorName: room.player1_name,
@@ -78,13 +91,15 @@ app.post('/join_room.php', (req, res) => {
         });
     }
 
-    // **[تم التعديل]** إعادة انضمام اللاعب الثاني وإلغاء مؤقت الحذف إن وجد
+    // إعادة انضمام اللاعب الثاني وإلغاء مؤقت الحذف إن وجد
     if (room.player2_id === playerId) {
         room.player2_connected = true;
         if (room.disconnectTimer) {
             clearTimeout(room.disconnectTimer);
             room.disconnectTimer = null;
         }
+        room.lastEventMessage = `اللاعب "${room.player2_name}" عاد للغرفة`;
+
         return res.json({
             status: "rejoined_player2",
             creatorName: room.player1_name,
@@ -98,6 +113,8 @@ app.post('/join_room.php', (req, res) => {
         room.player2_id = playerId;
         room.player2_name = playerName;
         room.player2_connected = true;
+        room.lastEventMessage = `اللاعب "${playerName}" انضم للغرفة`;
+
         return res.json({
             status: "joined",
             creatorName: room.player1_name,
@@ -135,7 +152,7 @@ app.post('/make_move.php', (req, res) => {
 
 // 5. جلب التحديثات دورياً (/get_updates.php)
 app.post('/get_updates.php', (req, res) => {
-    const { roomId } = req.body;
+    const { roomId, myTag, playerName } = req.body;
 
     if (!rooms[roomId]) {
         return res.json({ status: "room_deleted" });
@@ -143,17 +160,24 @@ app.post('/get_updates.php', (req, res) => {
 
     const room = rooms[roomId];
 
-    // **[تم التعديل بالكامل هنا]** إدارة مهلة الـ 30 ثانية عند انقطاع أحد اللاعبين الأساسيين
+    // تحديث حالة اتصال اللاعب الحالي الذي يقوم بالطلب (لتفادي فقدان الاتصال الوهمي)
+    if (myTag === 1) {
+        room.player1_connected = true;
+    } else if (myTag === 2) {
+        room.player2_connected = true;
+    }
+
+    // إدارة مهلة الـ 30 ثانية عند انقطاع أحد اللاعبين الأساسيين
     const isPlayer1Active = room.player1_connected;
     const isPlayer2Active = room.player2_id && room.player2_connected;
 
-    // إذا كان أحد اللاعبين الأساسيين قد انقطع اتصاله ولم تبدأ المهلة بعد
-    if ((!isPlayer1Active || !isPlayer2Active) && !room.disconnectTimer) {
+    // إذا بدأ اللعب (يوجد لاعب ثاني) وأصبح أحد اللاعبين غير متصل ولم يبدأ المؤقت بعد
+    if (room.player2_id && (!isPlayer1Active || !isPlayer2Active) && !room.disconnectTimer) {
         room.disconnectTimer = setTimeout(() => {
             if (rooms[roomId]) {
                 delete rooms[roomId]; // حذف الغرفة نهائياً بعد مرور 30 ثانية
             }
-        }, 30000); // 30 ثانية
+        }, 30000); 
     } 
     // إذا عاد اللاعبان معاً قبل انتهاء الـ 30 ثانية، نلغي المؤقت
     else if (isPlayer1Active && isPlayer2Active && room.disconnectTimer) {
@@ -175,8 +199,14 @@ app.post('/get_updates.php', (req, res) => {
         newGameRequest: room.newGameRequest,
         newGameAccepted: room.newGameAccepted,
         newGameDeclined: room.newGameDeclined,
-        boardHistory: room.boardHistory
+        boardHistory: room.boardHistory,
+        lastEventMessage: room.lastEventMessage // **[تمت الإضافة]** لإرسال رسالة العودة أو الانضمام للتطبيق
     };
+
+    // مسح رسالة الحدث بعد قراءتها لكي لا تتكرر
+    if (room.lastEventMessage) {
+        room.lastEventMessage = null;
+    }
 
     if (room.newGameAccepted) {
         setTimeout(() => {
@@ -243,14 +273,16 @@ app.post('/leave_room.php', (req, res) => {
     if (rooms[roomId]) {
         const room = rooms[roomId];
 
-        // **[تم التعديل]** تسجيل خروج اللاعب وتفعيل مؤقت الـ 30 ثانية فوراً
+        // تسجيل خروج اللاعب وتفعيل مؤقت الـ 30 ثانية فوراً
         if (playerTag === 1 || room.player1_id === playerId) {
             room.player1_connected = false;
+            room.lastEventMessage = `المنشئ "${room.player1_name}" غادر الغرفة`;
         } else if (playerTag === 2 || room.player2_id === playerId) {
             room.player2_connected = false;
+            room.lastEventMessage = `اللاعب "${room.player2_name}" غادر الغرفة`;
         }
 
-        // إذا لم يبدأ المؤقت بعد، نبدأه عند مغادرة أحد اللاعبين الأساسيين
+        // بدء المؤقت عند مغادرة أحد اللاعبين الأساسيين إذا لم يكن مفعلًا
         if (!room.disconnectTimer) {
             room.disconnectTimer = setTimeout(() => {
                 if (rooms[roomId]) {
