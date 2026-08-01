@@ -33,7 +33,24 @@ app.post('/create_room.php', (req, res) => {
     return res.json({ status: "created" });
 });
 
-// 2. انضمام غرفة (/join_room.php)
+// 2. استعراض الغرف المتاحة (/get_rooms.php) - [أضفنا هذا المسار ليتوافق مع واجهة القائمة لديك]
+app.all('/get_rooms.php', (req, res) => {
+    const roomsList = [];
+    for (const rId in rooms) {
+        const room = rooms[rId];
+        // إرجاع الغرف التي لم يكتمل فيها اللاعب الثاني بعد
+        if (!room.player2_id || !room.player2_connected) {
+            roomsList.push({
+                roomId: rId,
+                creatorName: room.player1_name,
+                hasOpponent: false
+            });
+        }
+    }
+    return res.json(roomsList);
+});
+
+// 3. انضمام غرفة (/join_room.php)
 app.post('/join_room.php', (req, res) => {
     const { roomId, playerName, playerId, player } = req.body;
 
@@ -88,7 +105,7 @@ app.post('/join_room.php', (req, res) => {
     });
 });
 
-// 3. تنفيذ حركة (/make_move.php)
+// 4. تنفيذ حركة (/make_move.php)
 app.post('/make_move.php', (req, res) => {
     const { roomId, board, pos, player } = req.body;
 
@@ -103,7 +120,7 @@ app.post('/make_move.php', (req, res) => {
     return res.json({ status: "ok" });
 });
 
-// 4. جلب التحديثات دورياً (/get_updates.php) - [تم التعديل هنا]
+// 5. جلب التحديثات دورياً (/get_updates.php)
 app.post('/get_updates.php', (req, res) => {
     const { roomId } = req.body;
 
@@ -118,14 +135,11 @@ app.post('/get_updates.php', (req, res) => {
         return res.json({ status: "room_deleted" });
     }
 
-    // التعديل: حساب الدور ديناميكياً بناءً على عدد الحركات المسجلة في اللعبة
-    // إذا كان عدد الحركات زوجياً (0, 2, 4...) فالـدور للاعب الأول (1)
-    // وإذا كان فردياً (1, 3, 5...) فالـدور للاعب الثاني (2)
     const currentTurn = (room.boardHistory.length % 2 === 0) ? 1 : 2;
 
     const responseData = {
         status: "ok",
-        turn: currentTurn, // إرسال الدور المحدث بانتظام للتطبيق
+        turn: currentTurn,
         creatorName: room.player1_name,
         opponentName: room.player2_name,
         opponentConnected: room.player2_connected,
@@ -153,7 +167,7 @@ app.post('/get_updates.php', (req, res) => {
     return res.json(responseData);
 });
 
-// 5. إرسال دردشة أو إيموجي (/send_chat.php)
+// 6. إرسال دردشة أو إيموجي (/send_chat.php)
 app.post('/send_chat.php', (req, res) => {
     const { roomId, message } = req.body;
     if (rooms[roomId]) {
@@ -163,7 +177,7 @@ app.post('/send_chat.php', (req, res) => {
     return res.json({ status: "error" });
 });
 
-// 6. طلب لعبة جديدة (/request_new_game.php)
+// 7. طلب لعبة جديدة (/request_new_game.php)
 app.post('/request_new_game.php', (req, res) => {
     const { roomId, senderTag, requestId } = req.body;
     if (rooms[roomId]) {
@@ -173,20 +187,20 @@ app.post('/request_new_game.php', (req, res) => {
     return res.json({ status: "error" });
 });
 
-// 7. قبول لعبة جديدة (/accept_new_game.php)
+// 8. قبول لعبة جديدة (/accept_new_game.php)
 app.post('/accept_new_game.php', (req, res) => {
     const { roomId } = req.body;
     if (rooms[roomId]) {
         rooms[roomId].newGameAccepted = true;
         rooms[roomId].newGameRequest = null;
-        rooms[roomId].boardHistory = []; // تصفير السجل لجولة جديدة
+        rooms[roomId].boardHistory = [];
         rooms[roomId].lastMove = null;
         return res.json({ status: "ok" });
     }
     return res.json({ status: "error" });
 });
 
-// 8. رفض لعبة جديدة (/decline_new_game.php)
+// 9. رفض لعبة جديدة (/decline_new_game.php)
 app.post('/decline_new_game.php', (req, res) => {
     const { roomId } = req.body;
     if (rooms[roomId]) {
@@ -197,14 +211,13 @@ app.post('/decline_new_game.php', (req, res) => {
     return res.json({ status: "error" });
 });
 
-// 9. مغادرة الغرفة (/leave_room.php)
+// 10. مغادرة الغرفة (/leave_room.php)
 app.post('/leave_room.php', (req, res) => {
     const { roomId, playerTag } = req.body;
     if (rooms[roomId]) {
         if (playerTag === 1) rooms[roomId].player1_connected = false;
         if (playerTag === 2) rooms[roomId].player2_connected = false;
         
-        // إذا غادر الاثنان، احذف الغرفة
         if (!rooms[roomId].player1_connected && !rooms[roomId].player2_connected) {
             delete rooms[roomId];
         }
@@ -215,6 +228,5 @@ app.post('/leave_room.php', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Server is running on port 3000`);
+    console.log(`Server is running on port ${PORT}`);
 });
- 
