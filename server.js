@@ -27,13 +27,14 @@ app.post('/create_room.php', (req, res) => {
         lastChat: null,
         newGameRequest: null,
         newGameAccepted: false,
-        newGameDeclined: false
+        newGameDeclined: false,
+        disconnectTimer: null // **[تمت الإضافة]** مؤقت مهلة خروج أحد اللاعبين
     };
 
     return res.json({ status: "created" });
 });
 
-// 2. استعراض الغرف المتاحة (/get_rooms.php) - تبقى الغرفة ظاهرة دائماً طالما لم يتم حذفها نهائياً
+// 2. استعراض الغرف المتاحة (/get_rooms.php)
 app.all('/get_rooms.php', (req, res) => {
     const roomsList = [];
     for (const rId in rooms) {
@@ -62,9 +63,13 @@ app.post('/join_room.php', (req, res) => {
 
     const room = rooms[roomId];
 
-    // إعادة انضمام المنشئ (اللاعب الأول)
+    // **[تم التعديل]** إعادة انضمام المنشئ وإلغاء مؤقت الحذف إن وجد
     if (room.player1_id === playerId) {
         room.player1_connected = true;
+        if (room.disconnectTimer) {
+            clearTimeout(room.disconnectTimer);
+            room.disconnectTimer = null;
+        }
         return res.json({
             status: "rejoined_creator",
             creatorName: room.player1_name,
@@ -73,9 +78,13 @@ app.post('/join_room.php', (req, res) => {
         });
     }
 
-    // إعادة انضمام اللاعب الثاني
+    // **[تم التعديل]** إعادة انضمام اللاعب الثاني وإلغاء مؤقت الحذف إن وجد
     if (room.player2_id === playerId) {
         room.player2_connected = true;
+        if (room.disconnectTimer) {
+            clearTimeout(room.disconnectTimer);
+            room.disconnectTimer = null;
+        }
         return res.json({
             status: "rejoined_player2",
             creatorName: room.player1_name,
@@ -84,7 +93,7 @@ app.post('/join_room.php', (req, res) => {
         });
     }
 
-    // انضمام لاعب ثاني لأول مرة (إذا لم يكن هناك لاعب ثانٍ مسجل مسبقاً أو غير متصل وغادر)
+    // انضمام لاعب ثاني لأول مرة
     if (!room.player2_id || !room.player2_connected) {
         room.player2_id = playerId;
         room.player2_name = playerName;
@@ -97,7 +106,7 @@ app.post('/join_room.php', (req, res) => {
         });
     }
 
-    // إذا كانت الغرفة ممتلئة تماماً بلاعبين نشطين، يدخل كمشاهد
+    // المشاهدون
     if (!room.spectators.includes(playerName)) {
         room.spectators.push(playerName);
     }
@@ -134,9 +143,22 @@ app.post('/get_updates.php', (req, res) => {
 
     const room = rooms[roomId];
 
-    if (!room.player1_connected && !room.player2_connected && room.spectators.length === 0) {
-        delete rooms[roomId];
-        return res.json({ status: "room_deleted" });
+    // **[تم التعديل بالكامل هنا]** إدارة مهلة الـ 30 ثانية عند انقطاع أحد اللاعبين الأساسيين
+    const isPlayer1Active = room.player1_connected;
+    const isPlayer2Active = room.player2_id && room.player2_connected;
+
+    // إذا كان أحد اللاعبين الأساسيين قد انقطع اتصاله ولم تبدأ المهلة بعد
+    if ((!isPlayer1Active || !isPlayer2Active) && !room.disconnectTimer) {
+        room.disconnectTimer = setTimeout(() => {
+            if (rooms[roomId]) {
+                delete rooms[roomId]; // حذف الغرفة نهائياً بعد مرور 30 ثانية
+            }
+        }, 30000); // 30 ثانية
+    } 
+    // إذا عاد اللاعبان معاً قبل انتهاء الـ 30 ثانية، نلغي المؤقت
+    else if (isPlayer1Active && isPlayer2Active && room.disconnectTimer) {
+        clearTimeout(room.disconnectTimer);
+        room.disconnectTimer = null;
     }
 
     const currentTurn = (room.boardHistory.length % 2 === 0) ? 1 : 2;
@@ -208,7 +230,6 @@ app.post('/accept_new_game.php', (req, res) => {
 app.post('/decline_new_game.php', (req, res) => {
     const { roomId } = req.body;
     if (rooms[roomId]) {
-        // عند رفض إعادة اللعبة بعد نهاية الجولة، نقوم بحذف الغرفة تماماً لكي تختفي من القائمة
         delete rooms[roomId];
         return res.json({ status: "ok" });
     }
@@ -222,15 +243,20 @@ app.post('/leave_room.php', (req, res) => {
     if (rooms[roomId]) {
         const room = rooms[roomId];
 
+        // **[تم التعديل]** تسجيل خروج اللاعب وتفعيل مؤقت الـ 30 ثانية فوراً
         if (playerTag === 1 || room.player1_id === playerId) {
             room.player1_connected = false;
         } else if (playerTag === 2 || room.player2_id === playerId) {
             room.player2_connected = false;
         }
-        
-        // الغرفة تبقى مخزنة طالما أن أحد الطرفين أو المشاهدين موجودين، ولحفظها في القائمة حتى لو غادر اللاعب
-        if (!room.player1_connected && !room.player2_connected && room.spectators.length === 0) {
-            delete rooms[roomId];
+
+        // إذا لم يبدأ المؤقت بعد، نبدأه عند مغادرة أحد اللاعبين الأساسيين
+        if (!room.disconnectTimer) {
+            room.disconnectTimer = setTimeout(() => {
+                if (rooms[roomId]) {
+                    delete rooms[roomId];
+                }
+            }, 30000);
         }
 
         return res.json({ status: "ok" });
