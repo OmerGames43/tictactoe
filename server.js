@@ -33,24 +33,21 @@ app.post('/create_room.php', (req, res) => {
     return res.json({ status: "created" });
 });
 
-// 2. استعراض الغرف المتاحة (/get_rooms.php)
+// 2. استعراض الغرف المتاحة (/get_rooms.php) - تبقى الغرفة ظاهرة دائماً طالما لم يتم حذفها نهائياً
 app.all('/get_rooms.php', (req, res) => {
     const roomsList = [];
     for (const rId in rooms) {
         const room = rooms[rId];
         
-        // إرجاع الغرف التي لا يزال فيها مكان لخلو اللاعب الثاني أو في حالة انتظار
-        const isWaitingForPlayer = (!room.player2_id || !room.player2_connected);
-        
-        if (isWaitingForPlayer) {
-            roomsList.push({
-                roomId: rId,
-                creatorName: room.player1_name,
-                opponentName: room.player2_name,
-                hasOpponent: !!room.player2_id,
-                spectatorsCount: room.spectators.length
-            });
-        }
+        roomsList.push({
+            roomId: rId,
+            creatorName: room.player1_name,
+            opponentName: room.player2_name,
+            creatorPlayerId: room.player1_id,
+            opponentPlayerId: room.player2_id,
+            hasOpponent: !!(room.player2_id && room.player2_connected),
+            spectatorsCount: room.spectators.length
+        });
     }
     return res.json(roomsList);
 });
@@ -87,7 +84,7 @@ app.post('/join_room.php', (req, res) => {
         });
     }
 
-    // انضمام لاعب ثاني لأول مرة (إذا لم يكن هناك لاعب ثانٍ أو كان غير متصل)
+    // انضمام لاعب ثاني لأول مرة (إذا لم يكن هناك لاعب ثانٍ مسجل مسبقاً أو غير متصل وغادر)
     if (!room.player2_id || !room.player2_connected) {
         room.player2_id = playerId;
         room.player2_name = playerName;
@@ -100,7 +97,7 @@ app.post('/join_room.php', (req, res) => {
         });
     }
 
-    // إذا كانت الغرفة ممتلئة بالكامل، يدخل كمشاهد
+    // إذا كانت الغرفة ممتلئة تماماً بلاعبين نشطين، يدخل كمشاهد
     if (!room.spectators.includes(playerName)) {
         room.spectators.push(playerName);
     }
@@ -137,7 +134,6 @@ app.post('/get_updates.php', (req, res) => {
 
     const room = rooms[roomId];
 
-    // حذف الغرفة فقط إذا انقطع اتصال الطرفين تماماً
     if (!room.player1_connected && !room.player2_connected && room.spectators.length === 0) {
         delete rooms[roomId];
         return res.json({ status: "room_deleted" });
@@ -232,7 +228,7 @@ app.post('/leave_room.php', (req, res) => {
             room.player2_connected = false;
         }
         
-        // لا يتم حذف الغرفة بشكل نهائي إلا إذا خرج الطرفان تماماً ولم يتبق مشاهدون
+        // الغرفة تبقى مخزنة طالما أن أحد الطرفين أو المشاهدين موجودين، ولحفظها في القائمة حتى لو غادر اللاعب
         if (!room.player1_connected && !room.player2_connected && room.spectators.length === 0) {
             delete rooms[roomId];
         }
