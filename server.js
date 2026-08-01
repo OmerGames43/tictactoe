@@ -208,8 +208,8 @@ app.post('/accept_new_game.php', (req, res) => {
 app.post('/decline_new_game.php', (req, res) => {
     const { roomId } = req.body;
     if (rooms[roomId]) {
-        rooms[roomId].newGameDeclined = true;
-        rooms[roomId].newGameRequest = null;
+        // عند رفض إعادة اللعبة بعد نهاية الجولة، نقوم بحذف الغرفة تماماً لكي تختفي من القائمة
+        delete rooms[roomId];
         return res.json({ status: "ok" });
     }
     return res.json({ status: "error" });
