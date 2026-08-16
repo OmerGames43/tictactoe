@@ -8,7 +8,7 @@ const rooms = {};
 
 // 1. إنشاء غرفة جديدة (/create_room.php)
 app.post('/create_room.php', (req, res) => {
-    const { roomId, playerName, playerId } = req.body;
+    const { roomId, playerName, playerId, roomType } = req.body;
 
     if (rooms[roomId]) {
         return res.json({ status: "exists" });
@@ -28,9 +28,16 @@ app.post('/create_room.php', (req, res) => {
         newGameRequest: null,
         newGameAccepted: false,
         newGameDeclined: false,
-        disconnectTimer: null, // مؤقت مهلة خروج أحد اللاعبين (30 ثانية)
-        createdAt: Date.now(), // لتسجيل وقت الإنشاء وحذف الغرفة بعد ساعة إذا لم ينضم أحد
-        lastEventMessage: null // لتنبيهات انضمام أو عودة اللاعبين
+        disconnectTimer: null,
+        createdAt: Date.now(),
+        lastEventMessage: null,
+        roomType: roomType || "عامة",
+        
+        // متغيرات المؤقتات وإدارة الوقت الخادم
+        timeLeftPlayer1: 180000,
+        timeLeftPlayer2: 180000,
+        lastTimerUpdate: Date.now(),
+        timerRunning: false
     };
 
     return res.json({ status: "created" });
@@ -40,7 +47,6 @@ app.post('/create_room.php', (req, res) => {
 app.all('/get_rooms.php', (req, res) => {
     const now = Date.now();
     for (const rId in rooms) {
-        // حذف الغرفة إذا مر عليها أكثر من ساعة (3600000 ملي ثانية) ولم ينضم لاعب ثاني
         if (!rooms[rId].player2_id && (now - rooms[rId].createdAt > 3600000)) {
             if (rooms[rId].disconnectTimer) clearTimeout(rooms[rId].disconnectTimer);
             delete rooms[rId];
@@ -51,6 +57,11 @@ app.all('/get_rooms.php', (req, res) => {
     for (const rId in rooms) {
         const room = rooms[rId];
         
+        // إظهار الغرف العامة فقط في القائمة العامة
+        if (room.roomType === "خاصة" && room.player2_id) {
+            continue;
+        }
+
         roomsList.push({
             roomId: rId,
             creatorName: room.player1_name,
@@ -58,7 +69,8 @@ app.all('/get_rooms.php', (req, res) => {
             creatorPlayerId: room.player1_id,
             opponentPlayerId: room.player2_id,
             hasOpponent: !!(room.player2_id && room.player2_connected),
-            spectatorsCount: room.spectators.length
+            spectatorsCount: room.spectators.length,
+            roomType: room.roomType
         });
     }
     return res.json(roomsList);
@@ -74,7 +86,6 @@ app.post('/join_room.php', (req, res) => {
 
     const room = rooms[roomId];
 
-    // إعادة انضمام المنشئ وإلغاء مؤقت الحذف إن وجد
     if (room.player1_id === playerId) {
         room.player1_connected = true;
         if (room.disconnectTimer) {
@@ -87,11 +98,12 @@ app.post('/join_room.php', (req, res) => {
             status: "rejoined_creator",
             creatorName: room.player1_name,
             opponentName: room.player2_name,
+            timeLeftPlayer1: room.timeLeftPlayer1,
+            timeLeftPlayer2: room.timeLeftPlayer2,
             gameState: { boardHistory: room.boardHistory }
         });
     }
 
-    // إعادة انضمام اللاعب الثاني وإلغاء مؤقت الحذف إن وجد
     if (room.player2_id === playerId) {
         room.player2_connected = true;
         if (room.disconnectTimer) {
@@ -104,26 +116,30 @@ app.post('/join_room.php', (req, res) => {
             status: "rejoined_player2",
             creatorName: room.player1_name,
             opponentName: room.player2_name,
+            timeLeftPlayer1: room.timeLeftPlayer1,
+            timeLeftPlayer2: room.timeLeftPlayer2,
             gameState: { boardHistory: room.boardHistory }
         });
     }
 
-    // انضمام لاعب ثاني لأول مرة
     if (!room.player2_id || !room.player2_connected) {
         room.player2_id = playerId;
         room.player2_name = playerName;
         room.player2_connected = true;
+        room.timerRunning = true; // بدء احتساب الوقت فور انضمام اللاعب الثاني
+        room.lastTimerUpdate = Date.now();
         room.lastEventMessage = `اللاعب "${playerName}" انضم للغرفة`;
 
         return res.json({
             status: "joined",
             creatorName: room.player1_name,
             opponentName: room.player2_name,
+            timeLeftPlayer1: room.timeLeftPlayer1,
+            timeLeftPlayer2: room.timeLeftPlayer2,
             gameState: { boardHistory: room.boardHistory }
         });
     }
 
-    // المشاهدون
     if (!room.spectators.includes(playerName)) {
         room.spectators.push(playerName);
     }
@@ -131,6 +147,8 @@ app.post('/join_room.php', (req, res) => {
         status: "spectator",
         creatorName: room.player1_name,
         opponentName: room.player2_name,
+        timeLeftPlayer1: room.timeLeftPlayer1,
+        timeLeftPlayer2: room.timeLeftPlayer2,
         gameState: { boardHistory: room.boardHistory }
     });
 });
@@ -144,6 +162,21 @@ app.post('/make_move.php', (req, res) => {
     }
 
     const room = rooms[roomId];
+    
+    // تحديث استهلاك الوقت عند كل حركة وقبل تبديل الدور
+    if (room.timerRunning) {
+        const now = Date.now();
+        const elapsed = now - room.lastTimerUpdate;
+        const currentTurn = (room.boardHistory.length % 2 === 0) ? 1 : 2;
+        
+        if (currentTurn === 1) {
+            room.timeLeftPlayer1 = Math.max(0, room.timeLeftPlayer1 - elapsed);
+        } else {
+            room.timeLeftPlayer2 = Math.max(0, room.timeLeftPlayer2 - elapsed);
+        }
+        room.lastTimerUpdate = now;
+    }
+
     room.lastMove = { board, pos, player };
     room.boardHistory.push({ board, pos, player });
 
@@ -152,7 +185,7 @@ app.post('/make_move.php', (req, res) => {
 
 // 5. جلب التحديثات دورياً (/get_updates.php)
 app.post('/get_updates.php', (req, res) => {
-    const { roomId, myTag, playerName } = req.body;
+    const { roomId, myTag } = req.body;
 
     if (!rooms[roomId]) {
         return res.json({ status: "room_deleted" });
@@ -181,6 +214,20 @@ app.post('/get_updates.php', (req, res) => {
         room.disconnectTimer = null;
     }
 
+    // حساب الوقت المتبقي في الخلفية بناءً على خادم الوقت إذا كان اللعب جارياً
+    if (room.timerRunning && room.player2_id) {
+        const now = Date.now();
+        const elapsed = now - room.lastTimerUpdate;
+        room.lastTimerUpdate = now;
+
+        const currentTurn = (room.boardHistory.length % 2 === 0) ? 1 : 2;
+        if (currentTurn === 1) {
+            room.timeLeftPlayer1 = Math.max(0, room.timeLeftPlayer1 - elapsed);
+        } else {
+            room.timeLeftPlayer2 = Math.max(0, room.timeLeftPlayer2 - elapsed);
+        }
+    }
+
     const currentTurn = (room.boardHistory.length % 2 === 0) ? 1 : 2;
 
     const responseData = {
@@ -188,7 +235,7 @@ app.post('/get_updates.php', (req, res) => {
         turn: currentTurn,
         creatorName: room.player1_name,
         opponentName: room.player2_name,
-        opponentConnected: room.player2_connected,
+        opponentConnected: !!(room.player2_id && room.player2_connected),
         spectators: room.spectators,
         lastMove: room.lastMove,
         lastChat: room.lastChat,
@@ -196,7 +243,9 @@ app.post('/get_updates.php', (req, res) => {
         newGameAccepted: room.newGameAccepted,
         newGameDeclined: room.newGameDeclined,
         boardHistory: room.boardHistory,
-        lastEventMessage: room.lastEventMessage
+        lastEventMessage: room.lastEventMessage,
+        timeLeftPlayer1: room.timeLeftPlayer1,
+        timeLeftPlayer2: room.timeLeftPlayer2
     };
 
     if (room.lastEventMessage) {
@@ -207,6 +256,10 @@ app.post('/get_updates.php', (req, res) => {
         setTimeout(() => {
             if (rooms[roomId]) {
                 rooms[roomId].newGameAccepted = false;
+                rooms[roomId].timeLeftPlayer1 = 180000;
+                rooms[roomId].timeLeftPlayer2 = 180000;
+                rooms[roomId].lastTimerUpdate = Date.now();
+                rooms[roomId].timerRunning = true;
             }
         }, 2000);
     }
@@ -218,7 +271,6 @@ app.post('/get_updates.php', (req, res) => {
     return res.json(responseData);
 });
 
-// 6. إرسال دردشة أو إيموجي (/send_chat.php)
 app.post('/send_chat.php', (req, res) => {
     const { roomId, message } = req.body;
     if (rooms[roomId]) {
@@ -228,7 +280,6 @@ app.post('/send_chat.php', (req, res) => {
     return res.json({ status: "error" });
 });
 
-// 7. طلب لعبة جديدة (/request_new_game.php)
 app.post('/request_new_game.php', (req, res) => {
     const { roomId, senderTag, requestId } = req.body;
     if (rooms[roomId]) {
@@ -238,7 +289,6 @@ app.post('/request_new_game.php', (req, res) => {
     return res.json({ status: "error" });
 });
 
-// 8. قبول لعبة جديدة (/accept_new_game.php)
 app.post('/accept_new_game.php', (req, res) => {
     const { roomId } = req.body;
     if (rooms[roomId]) {
@@ -246,12 +296,15 @@ app.post('/accept_new_game.php', (req, res) => {
         rooms[roomId].newGameRequest = null;
         rooms[roomId].boardHistory = [];
         rooms[roomId].lastMove = null;
+        rooms[roomId].timeLeftPlayer1 = 180000;
+        rooms[roomId].timeLeftPlayer2 = 180000;
+        rooms[roomId].timerRunning = true;
+        rooms[roomId].lastTimerUpdate = Date.now();
         return res.json({ status: "ok" });
     }
     return res.json({ status: "error" });
 });
 
-// 9. رفض لعبة جديدة (/decline_new_game.php)
 app.post('/decline_new_game.php', (req, res) => {
     const { roomId } = req.body;
     if (rooms[roomId]) {
@@ -261,7 +314,6 @@ app.post('/decline_new_game.php', (req, res) => {
     return res.json({ status: "error" });
 });
 
-// 10. مغادرة الغرفة (/leave_room.php)
 app.post('/leave_room.php', (req, res) => {
     const { roomId, playerTag, playerId } = req.body;
     
@@ -276,7 +328,6 @@ app.post('/leave_room.php', (req, res) => {
             room.lastEventMessage = `اللاعب "${room.player2_name}" غادر الغرفة`;
         }
 
-        // إذا لم ينضم اللاعب الثاني بعد، فلا تحذف الغرفة ولا تفعل مؤقت الـ 30 ثانية
         if (!room.player2_id) {
             return res.json({ status: "ok" });
         }
@@ -294,7 +345,6 @@ app.post('/leave_room.php', (req, res) => {
     return res.json({ status: "room_not_found" });
 });
 
-// **[هام جداً لتشغيل السيرفر على Render ومنع خطأ الـ Crash]**
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
