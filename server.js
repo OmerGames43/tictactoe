@@ -8,7 +8,7 @@ const rooms = {};
 
 // 1. إنشاء غرفة جديدة (/create_room.php)
 app.post('/create_room.php', (req, res) => {
-    const { roomId, playerName, playerId, roomType } = req.body;
+    const { roomId, playerName, playerId, roomType, roomPassword } = req.body;
 
     if (rooms[roomId]) {
         return res.json({ status: "exists" });
@@ -32,6 +32,7 @@ app.post('/create_room.php', (req, res) => {
         createdAt: Date.now(),
         lastEventMessage: null,
         roomType: roomType || "عامة",
+        roomPassword: roomPassword || "", // تخزين كلمة المرور
         
         // متغيرات المؤقتات وإدارة الوقت الخادم
         timeLeftPlayer1: 180000,
@@ -78,7 +79,7 @@ app.all('/get_rooms.php', (req, res) => {
 
 // 3. انضمام غرفة (/join_room.php)
 app.post('/join_room.php', (req, res) => {
-    const { roomId, playerName, playerId } = req.body;
+    const { roomId, playerName, playerId, roomPassword } = req.body;
 
     if (!rooms[roomId]) {
         return res.json({ status: "room_not_found" });
@@ -120,6 +121,11 @@ app.post('/join_room.php', (req, res) => {
             timeLeftPlayer2: room.timeLeftPlayer2,
             gameState: { boardHistory: room.boardHistory }
         });
+    }
+
+    // التحقق من كلمة المرور إذا كانت الغرفة خاصة وانضمام لاعب جديد
+    if (room.roomType === "خاصة" && room.roomPassword && room.roomPassword !== roomPassword) {
+        return res.json({ status: "wrong_password" });
     }
 
     if (!room.player2_id || !room.player2_connected) {
